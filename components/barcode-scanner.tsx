@@ -24,6 +24,33 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
   const [videoROI, setVideoROI] = useState({ x: 0, y: 0, width: 0, height: 0 })
   const detectorRef = useRef<any>(null)
   const detectionLoopRef = useRef<number | null>(null)
+  const lastScanTimeRef = useRef<number>(0)
+  const audioContextRef = useRef<AudioContext | null>(null)
+  const SCAN_DELAY_MS = 700 // 0.7 second delay between scans
+
+  // Play beep sound on successful scan
+  const playBeep = () => {
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || (window as any).webkitAudioContext)()
+      }
+      const ctx = audioContextRef.current
+      const oscillator = ctx.createOscillator()
+      const gainNode = ctx.createGain()
+
+      oscillator.connect(gainNode)
+      gainNode.connect(ctx.destination)
+
+      oscillator.frequency.value = 1200 // Frequency in Hz
+      oscillator.type = 'sine'
+      gainNode.gain.value = 0.3 // Volume (0-1)
+
+      oscillator.start()
+      oscillator.stop(ctx.currentTime + 0.15) // Beep duration: 150ms
+    } catch {
+      // Audio not supported, silently ignore
+    }
+  }
 
   // Calculate ROI dimensions based on viewport and video coordinates
   const calculateROI = () => {
@@ -97,14 +124,14 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
           },
         })
 
-        // Apply zoom if supported for better close-up scanning
+        // Apply slight zoom if supported for better scanning
         const track = stream.getVideoTracks()[0]
         const capabilities = track.getCapabilities?.() as any
         if (capabilities?.zoom) {
           const minZoom = capabilities.zoom.min
           const maxZoom = capabilities.zoom.max
-          // Apply moderate zoom (30% of max range) for closer scanning
-          const targetZoom = minZoom + (maxZoom - minZoom) * 0.3
+          // Apply light zoom (15% of max range)
+          const targetZoom = minZoom + (maxZoom - minZoom) * 0.15
           await track.applyConstraints({ advanced: [{ zoom: targetZoom } as any] })
         }
 
@@ -170,9 +197,14 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
         // Detect barcodes only in the cropped ROI region
         const barcodes = await detectorRef.current.detect(canvas)
 
-        // Process first detected barcode (already filtered by ROI cropping)
+        // Process first detected barcode with delay between scans
         if (barcodes.length > 0) {
-          onBarcodeDetected(barcodes[0].rawValue)
+          const now = Date.now()
+          if (now - lastScanTimeRef.current >= SCAN_DELAY_MS) {
+            lastScanTimeRef.current = now
+            playBeep()
+            onBarcodeDetected(barcodes[0].rawValue)
+          }
         }
       } catch (err) {
         // Silently continue on detection errors
