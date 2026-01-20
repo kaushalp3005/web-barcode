@@ -24,9 +24,10 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
   const [videoROI, setVideoROI] = useState({ x: 0, y: 0, width: 0, height: 0 })
   const detectorRef = useRef<any>(null)
   const detectionLoopRef = useRef<number | null>(null)
-  const lastScanTimeRef = useRef<number>(0)
+  const lastDetectionTimeRef = useRef<number>(0)
+  const lastSuccessfulScanRef = useRef<string>('')
   const audioContextRef = useRef<AudioContext | null>(null)
-  const SCAN_DELAY_MS = 700 // 0.7 second delay between scans
+  const DETECTION_INTERVAL_MS = 700 // 0.7 second between detection attempts
 
   // Play beep sound on successful scan
   const playBeep = () => {
@@ -168,14 +169,25 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
   useEffect(() => {
     if (!isActive || !supportsBarcodeDetection || !videoRef.current) return
 
+    let timeoutId: ReturnType<typeof setTimeout> | null = null
+
     const detectBarcodes = async () => {
       try {
-        if (!videoRef.current || !detectorRef.current || !canvasRef.current) return
-        if (videoROI.width <= 0 || videoROI.height <= 0) return
+        if (!videoRef.current || !detectorRef.current || !canvasRef.current) {
+          timeoutId = setTimeout(detectBarcodes, DETECTION_INTERVAL_MS)
+          return
+        }
+        if (videoROI.width <= 0 || videoROI.height <= 0) {
+          timeoutId = setTimeout(detectBarcodes, DETECTION_INTERVAL_MS)
+          return
+        }
 
         const canvas = canvasRef.current
         const ctx = canvas.getContext('2d')
-        if (!ctx) return
+        if (!ctx) {
+          timeoutId = setTimeout(detectBarcodes, DETECTION_INTERVAL_MS)
+          return
+        }
 
         // Set canvas size to match ROI dimensions
         canvas.width = videoROI.width
@@ -197,27 +209,33 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
         // Detect barcodes only in the cropped ROI region
         const barcodes = await detectorRef.current.detect(canvas)
 
-        // Process first detected barcode with delay between scans
+        // Process first detected barcode (avoid duplicate consecutive scans)
         if (barcodes.length > 0) {
-          const now = Date.now()
-          if (now - lastScanTimeRef.current >= SCAN_DELAY_MS) {
-            lastScanTimeRef.current = now
+          const scannedValue = barcodes[0].rawValue
+          // Only report if it's a different barcode than the last one
+          if (scannedValue !== lastSuccessfulScanRef.current) {
+            lastSuccessfulScanRef.current = scannedValue
             playBeep()
-            onBarcodeDetected(barcodes[0].rawValue)
+            onBarcodeDetected(scannedValue)
           }
+        } else {
+          // Reset last scan when no barcode detected (allows re-scanning same barcode)
+          lastSuccessfulScanRef.current = ''
         }
       } catch (err) {
         // Silently continue on detection errors
       }
 
-      detectionLoopRef.current = requestAnimationFrame(detectBarcodes)
+      // Always wait DETECTION_INTERVAL_MS before next detection attempt
+      timeoutId = setTimeout(detectBarcodes, DETECTION_INTERVAL_MS)
     }
 
-    detectionLoopRef.current = requestAnimationFrame(detectBarcodes)
+    // Start detection loop
+    timeoutId = setTimeout(detectBarcodes, DETECTION_INTERVAL_MS)
 
     return () => {
-      if (detectionLoopRef.current) {
-        cancelAnimationFrame(detectionLoopRef.current)
+      if (timeoutId) {
+        clearTimeout(timeoutId)
       }
     }
   }, [isActive, supportsBarcodeDetection, onBarcodeDetected, videoROI])
