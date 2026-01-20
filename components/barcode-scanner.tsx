@@ -36,10 +36,9 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
 
     if (!videoWidth || !videoHeight) return
 
-    // ROI is 70% of the smaller dimension (display coordinates)
-    const roiSize = Math.min(containerWidth, containerHeight) * 0.7
-    const roiWidth = Math.min(roiSize, containerWidth * 0.8)
-    const roiHeight = roiSize * 0.4 // Barcode aspect ratio
+    // ROI is 90% of container width for closer scanning
+    const roiWidth = containerWidth * 0.9
+    const roiHeight = Math.min(containerHeight * 0.35, roiWidth * 0.5) // Taller ROI for easier positioning
 
     const displayROI = {
       width: roiWidth,
@@ -93,10 +92,21 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: 'environment',
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
           },
         })
+
+        // Apply zoom if supported for better close-up scanning
+        const track = stream.getVideoTracks()[0]
+        const capabilities = track.getCapabilities?.() as any
+        if (capabilities?.zoom) {
+          const minZoom = capabilities.zoom.min
+          const maxZoom = capabilities.zoom.max
+          // Apply moderate zoom (30% of max range) for closer scanning
+          const targetZoom = minZoom + (maxZoom - minZoom) * 0.3
+          await track.applyConstraints({ advanced: [{ zoom: targetZoom } as any] })
+        }
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream
