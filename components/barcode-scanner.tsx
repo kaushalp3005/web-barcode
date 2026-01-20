@@ -86,7 +86,7 @@ export default function BarcodeScanner({ onBarcodeDetected }: BarcodeScannerProp
         if ('BarcodeDetector' in window) {
           setSupportsBarcodeDetection(true)
           detectorRef.current = new window.BarcodeDetector({
-            formats: ['ean_13', 'ean_8', 'upca', 'code_39', 'code_128', 'qr_code'],
+            formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e', 'code_39', 'code_128', 'qr_code'],
           })
         }
 
